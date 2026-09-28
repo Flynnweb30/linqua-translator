@@ -13,6 +13,7 @@ export interface TranslationClientCallbacks {
   onOutputTranscript: (text: string, finished: boolean, lang?: string) => void;
   onInterrupted: () => void;
   onTurnComplete: () => void;
+  onLanguageDetected?: (lang: 'en' | 'es') => void;
   onError: (errMessage: string) => void;
 }
 
@@ -147,6 +148,12 @@ export class TranslationClient {
       case 'turn_complete':
         this.callbacks.onTurnComplete();
         this.setState('listening', 'Listening for speech...');
+        break;
+
+      case 'language_detected':
+        if (msg.lang === 'en' || msg.lang === 'es') {
+          this.callbacks.onLanguageDetected?.(msg.lang);
+        }
         break;
 
       case 'error':

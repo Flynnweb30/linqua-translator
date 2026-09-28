@@ -4,18 +4,15 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Radio } from 'lucide-react';
 import {
   AppSettings,
   ConnectionState,
   DirectionMode,
   TranscriptItem,
   TranslationMode,
-  AudioRuntimeStatus,
-  LanguageDetectionState,
 } from './types/translation';
 import { CRMCallRecord, DEFAULT_CRM_RECORD } from './types/crm';
-import { AudioCaptureEngine, CrmAudioCaptureEngine, VirtualMicBridge } from './services/audioCapture';
+import { AudioCaptureEngine, RemoteAudioCaptureEngine, AudioDeviceInfo } from './services/audioCapture';
 import { AudioPlaybackEngine } from './services/audioPlayback';
 import { TranslationClient } from './services/translationClient';
 import { Header } from './components/Header';
@@ -28,7 +25,7 @@ import { UserGuideModal } from './components/UserGuideModal';
 import { CRMCallWorkspace } from './components/CRMCallWorkspace';
 import { CommunicationCoach } from './components/CommunicationCoach';
 import { AudioRoutingPanel } from './components/AudioRoutingPanel';
-import type { AudioDevice, AudioOutputDevice } from './services/audioCapture';
+import { DetectedLanguage } from './types/translation';
 
 const DEFAULT_SETTINGS: AppSettings = {
   voiceName: 'Fenrir',
@@ -36,7 +33,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoPlayTranslation: true,
   showOriginalTranscript: true,
   showTranslationTranscript: true,
-  preferredInputDeviceId: '',
 };
 
 export default function App() {
@@ -54,20 +50,10 @@ export default function App() {
 
   // Audio metrics
   const [volumeLevel, setVolumeLevel] = useState(0);
-  const [crmVolumeLevel, setCrmVolumeLevel] = useState(0);
-  const [microphoneDevices, setMicrophoneDevices] = useState<AudioDevice[]>([]);
-  const [audioOutputDevices, setAudioOutputDevices] = useState<AudioOutputDevice[]>([]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState('');
-  const [selectedVirtualOutputId, setSelectedVirtualOutputId] = useState('');
-  const [languageDetection, setLanguageDetection] = useState<LanguageDetectionState>('unknown');
-  const [audioRuntime, setAudioRuntime] = useState<AudioRuntimeStatus>({
-    microphonePermission: 'unknown',
-    selectedDeviceId: '',
-    selectedDeviceLabel: '',
-    virtualMicrophone: 'unavailable',
-    crmAudio: 'unavailable',
-    processing: 'idle',
-  });
+  const [detectedLanguage, setDetectedLanguage] = useState<DetectedLanguage>('unknown');
+  const [inputDevices, setInputDevices] = useState<AudioDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState('default');
+  const [remoteCaptureActive, setRemoteCaptureActive] = useState(false);
 
   // Transcripts
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
@@ -111,34 +97,10 @@ export default function App() {
 
   // Engines refs
   const captureEngineRef = useRef<AudioCaptureEngine | null>(null);
+  const remoteCaptureEngineRef = useRef<RemoteAudioCaptureEngine | null>(null);
+  const selectedDeviceIdRef = useRef('default');
   const playbackEngineRef = useRef<AudioPlaybackEngine | null>(null);
   const clientRef = useRef<TranslationClient | null>(null);
-  const crmCaptureRef = useRef<CrmAudioCaptureEngine | null>(null);
-  const virtualMicBridgeRef = useRef<VirtualMicBridge | null>(null);
-
-  const refreshMicrophoneDevices = useCallback(async () => {
-    try {
-      const devices = await AudioCaptureEngine.enumerateDevices();
-      const outputs = await AudioCaptureEngine.enumerateOutputDevices();
-      setMicrophoneDevices(devices);
-      setAudioOutputDevices(outputs);
-      setSelectedVirtualOutputId((current) => current || outputs.find((device) => /cable|virtual|voicemeeter|line/i.test(device.label))?.deviceId || '');
-      setSelectedDeviceId((current) => {
-        const preferred = settings.preferredInputDeviceId || current;
-        if (preferred && devices.some((device) => device.deviceId === preferred)) return preferred;
-        return devices[0]?.deviceId || '';
-      });
-    } catch {
-      setMicrophoneDevices([]);
-    }
-  }, [settings.preferredInputDeviceId]);
-
-  useEffect(() => {
-    void refreshMicrophoneDevices();
-    void AudioCaptureEngine.getPermissionState().then((permission) => {
-      setAudioRuntime((prev) => ({ ...prev, microphonePermission: permission }));
-    });
-  }, [refreshMicrophoneDevices]);
 
   // Save settings on update
   const updateSettings = useCallback((newSettings: Partial<AppSettings>) => {
@@ -194,10 +156,12 @@ export default function App() {
   // Initialize translation client
   useEffect(() => {
     const captureEngine = new AudioCaptureEngine();
+    const remoteCaptureEngine = new RemoteAudioCaptureEngine();
     const playbackEngine = new AudioPlaybackEngine();
     playbackEngine.setAutoPlay(settings.autoPlayTranslation);
 
     captureEngineRef.current = captureEngine;
+    remoteCaptureEngineRef.current = remoteCaptureEngine;
     playbackEngineRef.current = playbackEngine;
 
     const client = new TranslationClient({
@@ -210,10 +174,9 @@ export default function App() {
       },
       onInterimInput: (text, lang) => {
         setInterimOriginal(text);
-        if (text.trim()) setLanguageDetection('detecting');
         if (lang === 'en' || lang === 'es') {
           setInterimLang(lang);
-          setLanguageDetection(lang === 'es' ? 'spanish' : 'english');
+          setDetectedLanguage(lang);
         }
       },
       onInputTranscript: (text, finished, lang) => {
@@ -223,7 +186,7 @@ export default function App() {
         });
         if (lang === 'en' || lang === 'es') {
           setInterimLang(lang);
-          setLanguageDetection(lang === 'es' ? 'spanish' : 'english');
+          setDetectedLanguage(lang);
         }
       },
       onOutputTranscript: (text, _finished, _lang) => {
@@ -235,6 +198,9 @@ export default function App() {
       },
       onTurnComplete: () => {
         commitTurn();
+      },
+      onLanguageDetected: (lang) => {
+        setDetectedLanguage(lang);
       },
       onError: (errMsg) => {
         setStateMessage(errMsg);
@@ -249,7 +215,6 @@ export default function App() {
     };
     const handleOffline = () => {
       setConnectionState('offline');
-      setLanguageDetection('offline');
       setStateMessage('Device is offline. Translation paused.');
       captureEngine.stop();
       playbackEngine.flush();
@@ -263,13 +228,67 @@ export default function App() {
       window.removeEventListener('offline', handleOffline);
       client.stop();
       captureEngine.stop();
-      crmCaptureRef.current?.stop();
-      crmCaptureRef.current = null;
-      virtualMicBridgeRef.current?.stop();
-      virtualMicBridgeRef.current = null;
       playbackEngine.close();
+      remoteCaptureEngine.stop();
     };
   }, [commitTurn, settings.autoPlayTranslation]);
+
+  const refreshInputDevices = useCallback(async () => {
+    if (!captureEngineRef.current) return;
+    try {
+      const devices = await captureEngineRef.current.listInputDevices();
+      setInputDevices(devices);
+      if (!selectedDeviceIdRef.current && devices.length) {
+        selectedDeviceIdRef.current = devices[0].deviceId;
+      }
+    } catch {
+      setInputDevices([]);
+    }
+  }, []);
+
+  const selectInputDevice = (deviceId: string) => {
+    selectedDeviceIdRef.current = deviceId;
+    setSelectedDeviceId(deviceId);
+    if (captureEngineRef.current?.isActive()) {
+      setStateMessage('Microphone changed. Stop and start translation to apply the new device.');
+    }
+  };
+
+  const startRemoteCapture = async () => {
+    if (!remoteCaptureEngineRef.current) return;
+    try {
+      await remoteCaptureEngineRef.current.startRemote({
+        onAudioChunk: (pcm) => {
+          // When CRM tab audio is active, it becomes the translation/detection input.
+          if (clientRef.current) clientRef.current.sendAudio(pcm);
+        },
+        onVolumeChange: (vol) => setVolumeLevel(vol),
+        onStatus: (status) => {
+          if (status === 'device-disconnected') {
+            setRemoteCaptureActive(false);
+            setDetectedLanguage('unknown');
+            setStateMessage('CRM tab audio capture ended.');
+          }
+        },
+      });
+      setRemoteCaptureActive(true);
+      setDetectedLanguage('unknown');
+      setStateMessage('CRM tab audio is live. Start translation to process the captured speaker audio.');
+    } catch (err) {
+      setRemoteCaptureActive(false);
+      setStateMessage(err instanceof Error ? err.message : 'CRM tab audio capture was not available.');
+    }
+  };
+
+  const stopRemoteCapture = () => {
+    remoteCaptureEngineRef.current?.stop();
+    setRemoteCaptureActive(false);
+    setDetectedLanguage('unknown');
+  };
+
+  useEffect(() => {
+    void refreshInputDevices();
+  }, [refreshInputDevices]);
 
   // Start Translation session
   const startTranslation = async () => {
@@ -277,204 +296,65 @@ export default function App() {
 
     try {
       setIsMicPermissionDenied(false);
-      setLanguageDetection('detecting');
 
-      const captureEngine = captureEngineRef.current;
-
-      // Always request/initialize the user's microphone first. This creates the
-      // browser-local processed "Linqua Translator" MediaStream.
-      await captureEngine.start(
+      // Start audio capture
+      await captureEngineRef.current.start(
         {
-          onAudioChunk: () => {
-            // The user's microphone is intentionally NOT sent to the CRM-input
-            // translation session by default. In CRM mode the incoming tab audio
-            // represents the other speaker. The processed mic stream remains
-            // available for WebRTC-compatible integrations.
+          onAudioChunk: (base64Pcm) => {
+            if (!remoteCaptureEngineRef.current?.isActive() && clientRef.current) {
+              clientRef.current.sendAudio(base64Pcm);
+            }
           },
-          onVolumeChange: setVolumeLevel,
+          onVolumeChange: (vol) => {
+            setVolumeLevel(vol);
+          },
+          onStatus: (status) => {
+            if (status === 'device-disconnected') {
+              setDetectedLanguage('unknown');
+              setStateMessage('Microphone disconnected. Select another input device or reconnect the microphone.');
+            }
+          },
           onError: (err) => {
             console.error('Audio capture error:', err);
           },
-          onDeviceEnded: () => {
-            setAudioRuntime((prev) => ({
-              ...prev,
-              microphonePermission: 'granted',
-              processing: 'idle',
-              virtualMicrophone: 'unavailable',
-            }));
-            setStateMessage('The selected microphone was disconnected. Select another input device.');
-          },
         },
-        {
-          noiseSuppression: settings.noiseSuppression,
-          deviceId: selectedDeviceId || settings.preferredInputDeviceId || undefined,
-        }
+        { noiseSuppression: settings.noiseSuppression, deviceId: selectedDeviceIdRef.current }
       );
 
-      const captureStatus = captureEngine.getStatus();
-      setAudioRuntime((prev) => ({
-        ...prev,
-        microphonePermission: captureStatus.permission,
-        selectedDeviceId: captureStatus.deviceId,
-        selectedDeviceLabel: captureStatus.deviceLabel,
-        virtualMicrophone: captureStatus.virtualMicrophone,
-        processing: captureStatus.processing,
-      }));
-
-      await refreshMicrophoneDevices();
-
-      // Optional OS virtual-audio bridge. If a virtual cable/virtual mixer is
-      // installed, route the processed browser stream to its playback endpoint.
-      if (selectedVirtualOutputId) {
-        const bridge = new VirtualMicBridge();
-        await bridge.connect(captureEngine.getProcessedStream()!, selectedVirtualOutputId);
-        virtualMicBridgeRef.current = bridge;
-      }
-
-      // In the CRM workflow, capture the remote call/tab audio as the actual
-      // translation input. The browser's explicit share picker is required.
-      const crmCapture = new CrmAudioCaptureEngine();
-      crmCaptureRef.current = crmCapture;
-      setAudioRuntime((prev) => ({ ...prev, crmAudio: 'requesting' }));
-
-      await crmCapture.start(
-        (base64Pcm) => clientRef.current?.sendAudio(base64Pcm),
-        setCrmVolumeLevel,
-        () => {
-          setAudioRuntime((prev) => ({ ...prev, crmAudio: 'ended' }));
-          setLanguageDetection('unknown');
-              setStateMessage('CRM audio capture ended. Reconnect the CRM tab audio to continue detecting the other speaker.');
-        }
-      );
-
-      setAudioRuntime((prev) => ({ ...prev, crmAudio: 'connected' }));
-
-      // Start the secure server-side translation channel only after the audio
-      // source is ready, preventing a live session from starting with no input.
+      // Connect to Gemini Live
+      await refreshInputDevices();
       clientRef.current.connect(mode, direction, settings.voiceName);
     } catch (err: any) {
-      crmCaptureRef.current?.stop();
-      crmCaptureRef.current = null;
-      virtualMicBridgeRef.current?.stop();
-      virtualMicBridgeRef.current = null;
-      captureEngineRef.current?.stop();
-
-      setAudioRuntime((prev) => ({
-        ...prev,
-        crmAudio: 'unavailable',
-        virtualMicrophone: 'unavailable',
-        processing: 'idle',
-      }));
-
+      console.error('Failed to start translation:', err);
       if (
         err?.name === 'NotAllowedError' ||
         err?.name === 'PermissionDeniedError' ||
-        err?.message?.toLowerCase?.().includes('permission')
+        err?.message?.includes('denied')
       ) {
         setIsMicPermissionDenied(true);
-        setLanguageDetection('offline');
-        } else {
+      } else {
         setConnectionState('error');
-        setLanguageDetection('offline');
-          setStateMessage(
-          err?.message ||
-            'Unable to start live audio. Allow microphone access and select the CRM tab with audio sharing enabled.'
-        );
+        setStateMessage(err?.message || 'Failed to start microphone or connect.');
       }
-    }
-  };
-
-  const captureCrmAudio = async () => {
-    const crmCapture = new CrmAudioCaptureEngine();
-    crmCaptureRef.current?.stop();
-    crmCaptureRef.current = crmCapture;
-    setAudioRuntime((prev) => ({ ...prev, crmAudio: 'requesting' }));
-
-    try {
-      await crmCapture.start(
-        (base64Pcm) => clientRef.current?.sendAudio(base64Pcm),
-        setCrmVolumeLevel,
-        () => {
-          setAudioRuntime((prev) => ({ ...prev, crmAudio: 'ended' }));
-          setLanguageDetection('unknown');
-            }
-      );
-      setAudioRuntime((prev) => ({ ...prev, crmAudio: 'connected' }));
-      setLanguageDetection('detecting');
-    } catch (err: any) {
-      crmCapture.stop();
-      crmCaptureRef.current = null;
-      setAudioRuntime((prev) => ({ ...prev, crmAudio: 'unavailable' }));
-      setStateMessage(err?.message || 'CRM audio capture was not started.');
-    }
-  };
-
-  const stopCrmAudio = () => {
-    crmCaptureRef.current?.stop();
-    crmCaptureRef.current = null;
-    setAudioRuntime((prev) => ({ ...prev, crmAudio: 'unavailable' }));
-    setCrmVolumeLevel(0);
-    setLanguageDetection('unknown');
-    setLanguageDetectionConfidence(0);
-  };
-
-  const connectVirtualMicBridge = async () => {
-    const stream = captureEngineRef.current?.getProcessedStream();
-    if (!stream) {
-      setStateMessage('Start the microphone first, then connect the virtual microphone bridge.');
-      return;
-    }
-    if (!selectedVirtualOutputId) {
-      setStateMessage('Select a virtual-audio playback device first.');
-      return;
-    }
-
-    try {
-      const bridge = new VirtualMicBridge();
-      await bridge.connect(stream, selectedVirtualOutputId);
-      virtualMicBridgeRef.current?.stop();
-      virtualMicBridgeRef.current = bridge;
-      setStateMessage('Processed microphone is now routed to the selected virtual-audio output.');
-    } catch (err: any) {
-      setStateMessage(err?.message || 'Unable to connect the virtual microphone bridge.');
-    }
-  };
-
-  const disconnectVirtualMicBridge = () => {
-    virtualMicBridgeRef.current?.stop();
-    virtualMicBridgeRef.current = null;
-    setStateMessage('Virtual microphone bridge disconnected.');
-  };
-
-  const handleSelectDevice = (deviceId: string) => {
-    setSelectedDeviceId(deviceId);
-    updateSettings({ preferredInputDeviceId: deviceId });
-    if (captureEngineRef.current?.isActive()) {
-      setStateMessage('Input device changed. Stop and start translation to apply the new microphone.');
     }
   };
 
   // Stop Translation session
   const stopTranslation = () => {
-    captureEngineRef.current?.stop();
-    crmCaptureRef.current?.stop();
-    crmCaptureRef.current = null;
-    virtualMicBridgeRef.current?.stop();
-    virtualMicBridgeRef.current = null;
-    playbackEngineRef.current?.flush();
-    clientRef.current?.stop();
+    if (captureEngineRef.current) {
+      captureEngineRef.current.stop();
+    }
+    remoteCaptureEngineRef.current?.stop();
+    setRemoteCaptureActive(false);
+    setDetectedLanguage('unknown');
+    if (playbackEngineRef.current) {
+      playbackEngineRef.current.flush();
+    }
+    if (clientRef.current) {
+      clientRef.current.stop();
+    }
     commitTurn();
-
     setVolumeLevel(0);
-    setCrmVolumeLevel(0);
-    setLanguageDetection('unknown');
-    setLanguageDetectionConfidence(0);
-    setAudioRuntime((prev) => ({
-      ...prev,
-      crmAudio: 'unavailable',
-      virtualMicrophone: 'unavailable',
-      processing: 'idle',
-    }));
     setConnectionState('idle');
     setStateMessage('Translation stopped');
   };
@@ -572,22 +452,17 @@ export default function App() {
         />
 
         <AudioRoutingPanel
-          devices={microphoneDevices}
-          outputDevices={audioOutputDevices}
-          selectedVirtualOutputId={selectedVirtualOutputId}
-          onSelectVirtualOutput={setSelectedVirtualOutputId}
-          onConnectVirtualMic={connectVirtualMicBridge}
-          onDisconnectVirtualMic={disconnectVirtualMicBridge}
-          virtualMicConnected={Boolean(virtualMicBridgeRef.current?.isActive())}
+          devices={inputDevices}
           selectedDeviceId={selectedDeviceId}
-          onSelectDevice={handleSelectDevice}
-          onRefreshDevices={() => void refreshMicrophoneDevices()}
-          onCaptureCrmAudio={() => void captureCrmAudio()}
-          onStopCrmAudio={stopCrmAudio}
-          runtime={audioRuntime}
-          language={languageDetection}
-          micVolume={volumeLevel}
-          crmVolume={crmVolumeLevel}
+          audioStatus={captureEngineRef.current?.getStatus() ?? 'idle'}
+          processedStreamReady={Boolean(captureEngineRef.current?.getProcessedStream())}
+          remoteCaptureActive={remoteCaptureActive}
+          remoteCaptureSupported={Boolean(navigator.mediaDevices?.getDisplayMedia)}
+          detectedLanguage={detectedLanguage}
+          onSelectDevice={selectInputDevice}
+          onStartRemoteCapture={startRemoteCapture}
+          onStopRemoteCapture={stopRemoteCapture}
+          onRefreshDevices={refreshInputDevices}
         />
 
         {/* CRM Call Workspace (Active call context for two-way conversations) */}
@@ -627,23 +502,6 @@ export default function App() {
           isTranslating={connectionState === 'translating'}
         />
 
-        <section id="virtual-mic-setup" className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 text-xs text-slate-400 space-y-2">
-          <div className="flex items-center gap-2 text-slate-200 font-semibold">
-            <Radio className="w-3.5 h-3.5 text-cyan-400" />
-            <span>CRM Virtual-Microphone Compatibility</span>
-          </div>
-          <p>
-            Linqua creates and processes a real browser MediaStream named <strong className="text-slate-300">Linqua Translator</strong>.
-            Chrome/Edge web pages cannot register that stream as a new Windows microphone device, so a CRM that only lists OS microphone devices cannot select it directly.
-          </p>
-          <p>
-            For a true system-level <strong className="text-slate-300">Linqua Translator</strong> microphone, use a native virtual-audio driver/helper and route this processed stream into that device. The browser app does not claim that capability by itself.
-          </p>
-          <p>
-            For incoming CRM audio, use <strong className="text-slate-300">Capture CRM Tab Audio</strong>. A Chrome extension using tab capture can automate that routing for supported CRM workflows.
-          </p>
-        </section>
-
         {/* Helper Footer note */}
         <div className="flex flex-wrap items-center justify-between text-xs text-slate-500 pt-2 border-t border-slate-900 gap-2">
           <div className="flex items-center space-x-2">
@@ -665,7 +523,7 @@ export default function App() {
           </div>
 
           <div className="flex items-center space-x-2">
-            <span>Engine: Live PCM + automatic language detection ↔ Gemini Live (Voice: {settings.voiceName})</span>
+            <span>Engine: Processed live PCM ↔ Gemini Live • Developer: Flynn J.P.</span>
           </div>
         </div>
       </main>

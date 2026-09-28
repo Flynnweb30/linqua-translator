@@ -28,11 +28,6 @@ const ai = new GoogleGenAI({
   },
 });
 
-app.use((_, res, next) => {
-  res.setHeader('Permissions-Policy', 'microphone=(self), speaker-selection=(self)');
-  next();
-});
-
 app.use(express.json());
 
 // API health and configuration check
@@ -49,6 +44,14 @@ interface SessionOptions {
   mode: 'one-way' | 'two-way';
   direction: 'es-to-en' | 'en-to-es' | 'auto';
   voiceName?: string;
+}
+
+function normalizeLanguageCode(languageCode?: string): 'es' | 'en' | undefined {
+  if (!languageCode) return undefined;
+  const code = languageCode.toLowerCase();
+  if (code === 'es' || code.startsWith('es-')) return 'es';
+  if (code === 'en' || code.startsWith('en-')) return 'en';
+  return undefined;
 }
 
 function buildSystemInstruction(opts: SessionOptions): string {
@@ -208,21 +211,29 @@ wss.on('connection', (clientWs: WebSocket) => {
 
             // Interim live transcription (while user speaks)
             if (serverContent.interimInputTranscription?.text) {
+              const languageCode = normalizeLanguageCode(serverContent.interimInputTranscription.languageCode);
               safeSend({
                 type: 'interim_input',
                 text: serverContent.interimInputTranscription.text,
-                lang: serverContent.interimInputTranscription.languageCode,
+                lang: languageCode,
               });
+              if (languageCode) {
+                safeSend({ type: 'language_detected', lang: languageCode });
+              }
             }
 
             // Final / segment input transcription
             if (serverContent.inputTranscription?.text) {
+              const languageCode = normalizeLanguageCode(serverContent.inputTranscription.languageCode);
               safeSend({
                 type: 'input_transcript',
                 text: serverContent.inputTranscription.text,
                 finished: Boolean(serverContent.inputTranscription.finished),
-                lang: serverContent.inputTranscription.languageCode,
+                lang: languageCode,
               });
+              if (languageCode) {
+                safeSend({ type: 'language_detected', lang: languageCode });
+              }
             }
 
             // Output transcription (the spoken translation text)

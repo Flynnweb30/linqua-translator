@@ -1,7 +1,7 @@
 {
-  "name": "linqua-real-time-spanish-english-translator",
+  "name": "linqua-real-time-translator",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -36,9 +36,5 @@
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"
   },
-  "description": "Linqua real-time Spanish-English CRM speech translator with live audio routing.",
-  "author": "Flynn J.P.",
-  "engines": {
-    "node": ">=20.0.0"
-  }
+  "author": "Flynn J.P."
 }

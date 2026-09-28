@@ -1,5 +1,3 @@
-export type LanguageDetectionState = 'unknown' | 'detecting' | 'spanish' | 'english' | 'offline';
-
 export type ConnectionState =
   | 'idle'
   | 'connecting'
@@ -14,6 +12,7 @@ export type ConnectionState =
 export type TranslationMode = 'one-way' | 'two-way';
 
 export type DirectionMode = 'es-to-en' | 'en-to-es' | 'auto';
+export type DetectedLanguage = 'es' | 'en' | 'unknown';
 
 export interface TranscriptItem {
   id: string;
@@ -25,27 +24,12 @@ export interface TranscriptItem {
   isInterimTranslation?: boolean;
 }
 
-export interface AudioDeviceInfo {
-  deviceId: string;
-  label: string;
-}
-
-export interface AudioRuntimeStatus {
-  microphonePermission: 'unknown' | 'prompt' | 'granted' | 'denied';
-  selectedDeviceId: string;
-  selectedDeviceLabel: string;
-  virtualMicrophone: 'unavailable' | 'browser-stream' | 'system-device';
-  crmAudio: 'unavailable' | 'requesting' | 'connected' | 'ended';
-  processing: 'idle' | 'processing' | 'unsupported';
-}
-
 export interface AppSettings {
   voiceName: string;
   noiseSuppression: boolean;
   autoPlayTranslation: boolean;
   showOriginalTranscript: boolean;
   showTranslationTranscript: boolean;
-  preferredInputDeviceId: string;
 }
 
 export interface ServerMessage {
@@ -62,7 +46,8 @@ export interface ServerMessage {
     | 'turn_complete'
     | 'error'
     | 'stopped'
-    | 'pong';
+    | 'pong'
+    | 'language_detected';
   mode?: TranslationMode;
   direction?: DirectionMode;
   pcm?: string;

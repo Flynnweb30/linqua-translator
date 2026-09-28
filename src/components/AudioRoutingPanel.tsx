@@ -1,250 +1,138 @@
 import React from 'react';
-import {
-  AlertCircle,
-  CheckCircle2,
-  Circle,
-  ExternalLink,
-  Headphones,
-  Mic,
-  Radio,
-  RefreshCw,
-  Volume2,
-} from 'lucide-react';
-import { AudioDevice, AudioOutputDevice } from '../services/audioCapture';
-import { AudioRuntimeStatus, LanguageDetectionState } from '../types/translation';
+import { Circle, Headphones, Mic, MonitorUp, Radio, RefreshCw } from 'lucide-react';
+import { AudioEngineStatus, AudioDeviceInfo } from '../services/audioCapture';
+import { DetectedLanguage } from '../types/translation';
 
 interface AudioRoutingPanelProps {
-  devices: AudioDevice[];
+  devices: AudioDeviceInfo[];
   selectedDeviceId: string;
-  outputDevices: AudioOutputDevice[];
-  selectedVirtualOutputId: string;
-  onSelectVirtualOutput: (deviceId: string) => void;
-  onConnectVirtualMic: () => void;
-  onDisconnectVirtualMic: () => void;
-  virtualMicConnected: boolean;
+  audioStatus: AudioEngineStatus;
+  processedStreamReady: boolean;
+  remoteCaptureActive: boolean;
+  remoteCaptureSupported: boolean;
+  detectedLanguage: DetectedLanguage;
   onSelectDevice: (deviceId: string) => void;
+  onStartRemoteCapture: () => void;
+  onStopRemoteCapture: () => void;
   onRefreshDevices: () => void;
-  onCaptureCrmAudio: () => void;
-  onStopCrmAudio: () => void;
-  runtime: AudioRuntimeStatus;
-  language: LanguageDetectionState;
-  micVolume: number;
-  crmVolume: number;
 }
 
-const statusText: Record<AudioRuntimeStatus['virtualMicrophone'], string> = {
-  unavailable: 'Not active',
-  'browser-stream': 'Browser stream ready',
-  'system-device': 'System device available',
-};
+const languageConfig = {
+  es: { label: 'Spanish detected', dot: 'bg-emerald-400', text: 'text-emerald-300', border: 'border-emerald-500/30', bg: 'bg-emerald-500/10' },
+  en: { label: 'English detected', dot: 'bg-rose-400', text: 'text-rose-300', border: 'border-rose-500/30', bg: 'bg-rose-500/10' },
+  unknown: { label: 'Detecting / Unknown', dot: 'bg-slate-500', text: 'text-slate-300', border: 'border-slate-700', bg: 'bg-slate-900' },
+} as const;
 
 export const AudioRoutingPanel: React.FC<AudioRoutingPanelProps> = ({
   devices,
   selectedDeviceId,
-  outputDevices,
-  selectedVirtualOutputId,
-  onSelectVirtualOutput,
-  onConnectVirtualMic,
-  onDisconnectVirtualMic,
-  virtualMicConnected,
+  audioStatus,
+  processedStreamReady,
+  remoteCaptureActive,
+  remoteCaptureSupported,
+  detectedLanguage,
   onSelectDevice,
+  onStartRemoteCapture,
+  onStopRemoteCapture,
   onRefreshDevices,
-  onCaptureCrmAudio,
-  onStopCrmAudio,
-  runtime,
-  language,
-  micVolume,
-  crmVolume,
 }) => {
-  const languageLabel =
-    language === 'spanish'
-      ? 'Spanish detected'
-      : language === 'english'
-      ? 'English detected'
-      : language === 'detecting'
-      ? 'Detecting…'
-      : language === 'offline'
-      ? 'Detection unavailable'
-      : 'Unknown / waiting for speech';
-
-  const languageClass =
-    language === 'spanish'
-      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
-      : language === 'english'
-      ? 'border-rose-500/40 bg-rose-500/10 text-rose-300'
-      : 'border-slate-700 bg-slate-900 text-slate-400';
-
-  const indicatorClass =
-    language === 'spanish'
-      ? 'bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.65)]'
-      : language === 'english'
-      ? 'bg-rose-400 shadow-[0_0_12px_rgba(251,113,133,0.65)]'
-      : 'bg-slate-500';
+  const language = languageConfig[detectedLanguage];
+  const active = audioStatus === 'capturing';
 
   return (
-    <section className="bg-slate-900 border border-slate-800 rounded-xl shadow-sm overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-800 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+    <section className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5 space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <Radio className="w-4 h-4 text-cyan-400" />
-            <h2 className="text-sm font-bold text-slate-100">Live Audio Routing</h2>
+            <Headphones className="w-4 h-4 text-cyan-400" />
+            <h2 className="text-sm font-semibold text-slate-100">Live Audio Routing</h2>
           </div>
-          <p className="text-[11px] text-slate-500 mt-1">
-            Real microphone processing + CRM tab audio capture + automatic English/Spanish detection.
+          <p className="text-[11px] text-slate-400 mt-1">
+            Real microphone processing, browser audio routing, and live English/Spanish detection.
           </p>
         </div>
 
-        <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold ${languageClass}`}>
-          <span className={`w-2.5 h-2.5 rounded-full ${indicatorClass}`} />
-          <span>{languageLabel}</span>
-
+        <div className={`px-3 py-1.5 rounded-full border ${language.border} ${language.bg} flex items-center gap-2`}>
+          <span className={`w-2.5 h-2.5 rounded-full ${language.dot}`} />
+          <span className={`text-xs font-semibold ${language.text}`}>{language.label}</span>
         </div>
       </div>
 
-      <div className="p-4 grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <div className="rounded-xl bg-slate-950 border border-slate-800 p-3 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Mic className="w-4 h-4 text-blue-400" />
-              <span className="text-xs font-semibold text-slate-200">Microphone</span>
-            </div>
-            <span className="text-[10px] text-emerald-400">
-              {runtime.microphonePermission === 'granted' ? 'Permission granted' : runtime.microphonePermission}
-            </span>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Microphone</span>
+            <Mic className={`w-4 h-4 ${active ? 'text-emerald-400' : 'text-slate-600'}`} />
           </div>
-
           <div className="flex gap-2">
             <select
               value={selectedDeviceId}
               onChange={(e) => onSelectDevice(e.target.value)}
-              className="min-w-0 flex-1 px-2.5 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-              aria-label="Microphone input device"
+              className="min-w-0 flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-slate-200 outline-none"
+              aria-label="Select microphone"
             >
-              <option value="">System default microphone</option>
-              {devices.map((device) => (
-                <option key={device.deviceId} value={device.deviceId}>
-                  {device.label}
-                </option>
+              <option value="default">Default microphone</option>
+              {devices.filter((d) => d.deviceId !== 'default').map((device) => (
+                <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
               ))}
             </select>
             <button
-              type="button"
               onClick={onRefreshDevices}
-              className="p-2 rounded-lg border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-900"
-              title="Refresh microphone devices"
-              aria-label="Refresh microphone devices"
+              className="p-2 rounded-lg bg-slate-900 border border-slate-700 text-slate-400 hover:text-white"
+              title="Refresh microphones"
+              aria-label="Refresh microphones"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              <RefreshCw className="w-4 h-4" />
             </button>
           </div>
-
-          <div className="text-[10px] text-slate-500 truncate">
-            Active input: <span className="text-slate-300">{runtime.selectedDeviceLabel || 'Not started'}</span>
-          </div>
-
-          <div className="flex items-center gap-2 text-[10px] text-slate-400">
-            <span className="w-16 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-              <span className="block h-full bg-blue-400" style={{ width: `${Math.round(micVolume * 100)}%` }} />
-            </span>
-            <span>Processed input</span>
-          </div>
-        </div>
-
-        <div className="rounded-xl bg-slate-950 border border-slate-800 p-3 space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Headphones className="w-4 h-4 text-violet-400" />
-              <span className="text-xs font-semibold text-slate-200">CRM / Remote Audio</span>
-            </div>
-            <span className={`text-[10px] ${runtime.crmAudio === 'connected' ? 'text-emerald-400' : 'text-slate-500'}`}>
-              {runtime.crmAudio === 'connected' ? 'Connected' : runtime.crmAudio === 'requesting' ? 'Requesting' : 'Not connected'}
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={runtime.crmAudio === 'connected' ? onStopCrmAudio : onCaptureCrmAudio}
-            className={`w-full py-2 rounded-lg text-xs font-semibold border transition ${
-              runtime.crmAudio === 'connected'
-                ? 'bg-rose-500/10 border-rose-500/30 text-rose-300 hover:bg-rose-500/20'
-                : 'bg-violet-600/15 border-violet-500/30 text-violet-300 hover:bg-violet-600/25'
-            }`}
-          >
-            {runtime.crmAudio === 'connected' ? 'Stop CRM Audio Capture' : 'Capture CRM Tab Audio'}
-          </button>
-
-          <div className="flex items-center gap-2 text-[10px] text-slate-400">
-            <span className="w-16 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-              <span className="block h-full bg-violet-400" style={{ width: `${Math.round(crmVolume * 100)}%` }} />
-            </span>
-            <span>Remote audio level</span>
-          </div>
-
-          <p className="text-[10px] leading-relaxed text-slate-500">
-            In Chrome, choose the CRM calling tab and enable its audio. This is the supported browser route for receiving the other speaker’s tab audio.
+          <p className="text-[10px] text-slate-500 mt-2">
+            Permission status: {active ? 'Granted' : audioStatus === 'requesting-permission' ? 'Requesting…' : 'Not active'}
           </p>
         </div>
 
-        <div className="rounded-xl bg-slate-950 border border-slate-800 p-3 space-y-2">
-          <div className="flex items-center gap-2">
-            <Volume2 className="w-4 h-4 text-cyan-400" />
-            <span className="text-xs font-semibold text-slate-200">Linqua Translator</span>
+        <div className="rounded-xl bg-slate-950 border border-cyan-500/20 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Browser Virtual Mic</span>
+            <Radio className={`w-4 h-4 ${processedStreamReady ? 'text-cyan-400' : 'text-slate-600'}`} />
           </div>
-
-          <div className="flex items-center gap-2 text-[11px]">
-            {runtime.virtualMicrophone === 'browser-stream' ? (
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            ) : (
-              <Circle className="w-3.5 h-3.5 text-slate-600" />
-            )}
-            <span className="text-slate-300">{statusText[runtime.virtualMicrophone]}</span>
-          </div>
-
-          <div className="text-[10px] leading-relaxed text-slate-500">
-            The app creates a processed browser MediaStream named <strong className="text-slate-300">Linqua Translator</strong>.
-          </div>
-
-          <select
-            value={selectedVirtualOutputId}
-            onChange={(e) => onSelectVirtualOutput(e.target.value)}
-            className="w-full px-2 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 text-[10px] focus:outline-none focus:ring-1 focus:ring-cyan-500"
-            aria-label="Virtual audio output"
-          >
-            <option value="">Select virtual-audio output</option>
-            {outputDevices.map((device) => (
-              <option key={device.deviceId} value={device.deviceId}>
-                {device.label}
-              </option>
-            ))}
-          </select>
-
-          <button
-            type="button"
-            onClick={virtualMicConnected ? onDisconnectVirtualMic : onConnectVirtualMic}
-            className={`w-full py-2 rounded-lg text-[10px] font-semibold border ${
-              virtualMicConnected
-                ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-                : 'bg-cyan-600/10 border-cyan-500/30 text-cyan-300'
-            }`}
-          >
-            {virtualMicConnected ? 'Disconnect Virtual-Mic Bridge' : 'Connect Virtual-Mic Bridge'}
-          </button>
-
-          <div className="flex items-start gap-2 pt-1 text-[10px] leading-relaxed text-amber-300/80">
-            <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-            <span>
-              A browser cannot create the OS microphone itself. Install a virtual-audio driver/mixer first, select its playback endpoint here, then select the corresponding recording endpoint in the CRM.
-            </span>
-          </div>
-
-          <a
-            href="#virtual-mic-setup"
-            className="inline-flex items-center gap-1 text-[10px] text-cyan-400 hover:text-cyan-300"
-          >
-            <ExternalLink className="w-3 h-3" />
-            <span>See production routing requirements below</span>
-          </a>
+          <div className="text-sm font-semibold text-slate-100">Linqua Translator</div>
+          <p className="text-[10px] text-slate-400 mt-1">
+            {processedStreamReady
+              ? 'Processed MediaStream is live.'
+              : 'Starts after microphone permission is granted.'}
+          </p>
+          <p className="text-[10px] text-amber-300/80 mt-2">
+            Browser stream only — a system microphone device requires a native virtual-audio driver.
+          </p>
         </div>
+
+        <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">CRM / Tab Audio</span>
+            <MonitorUp className={`w-4 h-4 ${remoteCaptureActive ? 'text-blue-400' : 'text-slate-600'}`} />
+          </div>
+          {remoteCaptureActive ? (
+            <button onClick={onStopRemoteCapture} className="w-full py-2 rounded-lg bg-rose-600/20 border border-rose-500/30 text-rose-300 text-xs font-semibold">
+              Stop captured CRM audio
+            </button>
+          ) : (
+            <button
+              onClick={onStartRemoteCapture}
+              disabled={!remoteCaptureSupported}
+              className="w-full py-2 rounded-lg bg-blue-600/20 border border-blue-500/30 text-blue-300 text-xs font-semibold disabled:opacity-40"
+            >
+              Capture CRM tab audio
+            </button>
+          )}
+          <p className="text-[10px] text-slate-500 mt-2">
+            Select the CRM tab and enable its audio when Chrome prompts you. No silent cross-site capture is attempted.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 text-[10px] text-slate-500">
+        <Circle className="w-2.5 h-2.5 fill-current" />
+        <span>Language status is based on live speech recognition returned by the translation engine; silence or insufficient speech remains Unknown.</span>
       </div>
     </section>
   );

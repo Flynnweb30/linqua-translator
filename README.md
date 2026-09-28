@@ -1,201 +1,208 @@
-# Linqua — Real-Time Spanish ↔ English CRM Translator
+# Linqua — Real-Time Spanish ↔ English Translator
 
-Developer: **Flynn J.P.**
+**Developer:** Flynn J.P.
 
-Linqua is a browser-based real-time Spanish ↔ English speech translator for CRM calling workflows. It uses live browser audio capture, Web Audio processing, a secure server-side Gemini Live connection, automatic language identification, and live translated audio.
+Linqua is a browser-based real-time Spanish ↔ English speech-to-speech translator designed for CRM calling and live conversations. The implementation uses genuine browser audio capture, Web Audio processing, Gemini Live transcription/language detection, and a server-side WebSocket gateway.
 
-## Important platform boundary
+## Important browser/OS limitation
 
-A normal web page **cannot register a new Windows/macOS system microphone device**. Linqua therefore does not fake a system device.
+A normal website **cannot create or register a true system-wide microphone device** that appears in Chrome's microphone picker as a physical/virtual OS microphone.
 
-The application creates a real, processed browser `MediaStream` for the user's microphone and identifies that stream in the UI as **Linqua Translator**. This stream can be consumed by WebRTC-compatible application code, but a CRM that only exposes OS microphone devices cannot select it directly.
+This project therefore does **not** fake that capability.
 
-For a true CRM-selectable microphone path, install a virtual-audio driver/mixer on the operating system. Linqua can route its processed browser stream to an authorized audio-output endpoint; the CRM then selects the driver's corresponding recording endpoint. The browser itself still does not create or rename that OS device.
+After microphone permission is granted, Linqua creates a real processed `MediaStream` through Web Audio and labels the workflow **Linqua Translator** in the UI. That stream can be consumed by browser APIs that accept a `MediaStream`, but it cannot be selected as a microphone by an unrelated CRM website.
 
-## Audio workflow
+For a CRM that requires a system microphone device named **Linqua Translator**, use:
+
+1. Linqua browser app for processing/detection.
+2. A native audio-routing helper.
+3. An OS-level virtual audio device/driver.
+4. Route the processed Linqua stream from the helper into the virtual microphone.
+5. Select that OS device inside the CRM.
+
+Do not rely on an extension alone to manufacture an OS microphone. Chrome extensions can add browser capabilities such as tab/audio capture, but OS-level microphone registration still requires an appropriate native audio-routing layer.
+
+## Live audio workflow
 
 ```text
-User microphone
-    ↓
-getUserMedia() + browser echo cancellation/noise suppression
-    ↓
-Web Audio high-pass / low-pass / dynamics conditioning
-    ├──→ Browser-local processed MediaStream ("Linqua Translator")
-    └──→ microphone level monitor
-
-CRM call tab
-    ↓
-Chrome/Edge explicit tab-audio capture
-    ↓
-Web Audio conditioning
-    ↓
+Selected/default microphone
+        ↓
+Browser permission
+        ↓
+Web Audio processing
+  • echo cancellation
+  • browser noise suppression
+  • high-pass filtering
+  • low-pass filtering
+  • dynamics compression
+        ↓
+Real processed MediaStream
+        ↓
+"Linqua Translator" browser audio stream
+        ↓
 16 kHz mono PCM
-    ↓
-Secure WebSocket /api/live
-    ↓
-Gemini Live API
-    ├──→ automatic English/Spanish input transcription
-    ├──→ translated live transcript
-    └──→ 24 kHz translated audio
+        ↓
+WebSocket /api/live
+        ↓
+Gemini 3.8 Live
+        ↓
+Live input transcription + language code
+        ↓
+English / Spanish indicator
+        ↓
+Translated audio + transcript
 ```
 
-### Why CRM tab capture is used
+### CRM/remote-speaker audio
 
-A normal web page cannot silently read audio from another browser tab. Linqua therefore uses the browser's explicit display/tab-audio sharing flow. Select the CRM calling tab and enable its audio.
+Chrome can provide selected tab audio through `getDisplayMedia()` when the user explicitly chooses a tab/window and enables audio sharing.
 
-For a more automated Chrome CRM workflow, a companion extension using Chrome `tabCapture` can provide controlled tab-audio routing. The extension still cannot manufacture a system microphone; the OS virtual-audio driver provides that device.
+Linqua includes a **Capture CRM tab audio** workflow. It does not silently capture another website.
+
+When CRM tab audio is active, the captured tab audio becomes the translation/detection input. The microphone continues to be processed independently so the browser-side Linqua Translator stream remains available.
 
 ## Language detection
 
-Gemini Live input transcription is configured for automatic language detection by leaving the language-code hint list empty. Linqua only changes the live indicator when the live transcription service reports a recognized language:
+The language indicator uses the language information returned by the live speech-recognition/transcription engine.
 
-- **Green — Spanish detected**
-- **Red — English detected**
-- **Neutral — Unknown / Detecting / unavailable**
+- **Green:** Spanish detected.
+- **Red:** English detected.
+- **Neutral:** no reliable speech/language result, silence, unavailable input, permission failure, or disconnected capture.
 
-No keyword matching, prerecorded samples, random switching, or simulated detection is used.
-
-## Browser microphone processing
-
-The microphone requests browser-supported:
-
-- Echo cancellation
-- Noise suppression
-- Automatic gain control
-
-Linqua then applies deterministic Web Audio conditioning for stable PCM streaming. The CRM/tab audio path uses high-pass, low-pass, and dynamics conditioning. These are real signal-processing stages; they are not presented as AI noise cancellation.
+The application does not use keyword guessing, prerecorded audio, simulated speech, or arbitrary language switching.
 
 ## Local development
 
 Requirements:
 
-- Node.js 20+ recommended
-- Chrome or Edge recommended
-- Gemini API key
-
-Install:
-
-```text
-npm install
-```
+- Node.js 20+ recommended.
+- Google Gemini API key.
+- Chrome/Edge/another modern browser with microphone support.
 
 Create `.env`:
 
-```text
-GEMINI_API_KEY=your_key
+```env
+GEMINI_API_KEY=your_key_here
 PORT=3000
+NODE_ENV=development
 ```
 
-Run:
+Install and run:
 
 ```text
+npm install
 npm run dev
 ```
 
-Open the HTTPS deployment or local development URL in Chrome/Edge.
+The development server serves the Vite application and `/api/live` WebSocket endpoint from the same origin.
 
-## Production deployment
+## Production / Render
 
-### Render
+### Use Render Web Service — not Render Static Site
 
-**Use a Render Web Service, not a Render Static Site, for the full application.**
+The application requires:
 
-The translation backend uses a persistent WebSocket endpoint (`/api/live`) and keeps the Gemini API key server-side. A static-only deployment cannot provide that secure WebSocket gateway.
+- Node/Express server.
+- WebSocket endpoint `/api/live`.
+- Server-side Gemini API authentication.
 
-Recommended configuration:
+A pure Render Static Site cannot provide that server-side WebSocket gateway or securely hold the Gemini API key.
 
-- Service type: **Web Service**
-- Runtime: **Node**
-- Build command: `npm install && npm run build`
-- Start command: `npm start`
-- Environment:
-  - `NODE_ENV=production`
-  - `GEMINI_API_KEY=<set in Render secret environment variables>`
-  - `PORT=10000`
-- Publish directory: **not used by the Web Service**
-- Health endpoint: `/api/health`
+Use **New → Web Service** with:
 
-The included `render.yaml` contains the production service configuration.
+- Runtime: Node
+- Build Command: `npm install && npm run build`
+- Start Command: `npm start`
+- Health Check Path: `/api/health`
 
-### Static frontend limitation
+Environment variables:
 
-The generated `dist/` directory is a valid Vite static frontend and can be hosted separately, but the live translation functionality will not operate against a static host unless it connects to a separately deployed secure WebSocket/API backend.
+```text
+NODE_ENV=production
+GEMINI_API_KEY=<your private Gemini API key>
+PORT=10000
+```
 
-Do not place `GEMINI_API_KEY` in Vite client environment variables.
+`GEMINI_API_KEY` must be configured in Render's environment settings and must never be committed to GitHub.
+
+The included `render.yaml` contains the deployment definition.
 
 ## GitHub
 
-Push the project root including:
+Upload the project root as the repository root. Do not commit:
 
-- `src/`
-- `server.ts`
-- `package.json`
-- `render.yaml`
-- `vite.config.ts`
-- `tsconfig.json`
-- `.env.example`
-- `README.md`
+- `.env`
+- API keys
+- local build output
+- `node_modules`
 
-Do not commit `.env` or API credentials.
+`.gitignore` is included.
 
-## CRM production architecture
+## Production checks
 
-For a CRM that only accepts operating-system microphone devices, use the included browser bridge with an installed virtual-audio driver:
+Before deployment, verify:
+
+1. `npm install`
+2. `npm run lint`
+3. `npm run build`
+4. `npm start`
+5. Open `/api/health`
+6. Grant microphone permission.
+7. Confirm the selected microphone appears.
+8. Start translation.
+9. Confirm the processed browser stream becomes available.
+10. Speak Spanish and verify the green language state.
+11. Speak English and verify the red language state.
+12. Stop speaking and verify the state can return to neutral.
+13. Test CRM tab-audio capture from a user gesture.
+14. Disconnect/reconnect the microphone.
+15. Test the app with temporary network loss.
+16. Confirm existing CRM, transcript, settings, playback, reconnect, and mute controls remain usable.
+
+## Deployment architecture
+
+The production topology is intentionally:
+
+```text
+Browser
+  ├── Microphone → Web Audio → processed MediaStream
+  ├── Optional CRM tab audio → Web Audio
+  └── WebSocket over HTTPS/WSS
+                  ↓
+           Render Web Service
+                  ↓
+            Gemini Live API
+```
+
+This preserves the Gemini API key on the server and avoids exposing private credentials in the browser.
+
+## Native virtual-microphone architecture
+
+For a true CRM-selectable microphone named **Linqua Translator**, the recommended production architecture is:
 
 ```text
 Linqua Web App
-    ↓
+      ↓
 Processed browser MediaStream
-    ↓
-HTML audio output sink
-    ↓
-Virtual-audio driver playback endpoint
-    ↓
-Virtual-audio driver recording endpoint
-    ↓
-CRM microphone selector
+      ↓
+Native bridge / WebRTC or local IPC transport
+      ↓
+OS virtual audio input
+      ↓
+"Linqua Translator" microphone device
+      ↓
+CRM browser dialer
 ```
 
-On Windows, VB-AUDIO VB-CABLE or Voicemeeter can provide the operating-system virtual audio endpoints. Linqua does not rename those endpoints; if an exact device name **Linqua Translator** is mandatory, that name must be provided by the native virtual-audio layer.
+The exact native bridge depends on the target operating system and CRM. The web application must not claim that this OS device exists until the native audio layer has actually installed and exposed it.
 
-For incoming CRM audio:
+## Security
 
-```text
-CRM call tab
-    ↓
-Chrome tabCapture / explicit tab-audio capture
-    ↓
-Linqua remote-audio processor
-    ↓
-Gemini Live language detection + translation
-    ↓
-Translated audio to user's playback device
-```
-
-The native helper is required only for the system-microphone injection portion. The web app deliberately reports the browser-local stream as a browser stream rather than falsely claiming it is an OS microphone.
-
-## Reliability
-
-The implementation includes:
-
-- microphone permission handling
-- input-device enumeration and selection
-- microphone disconnect handling
-- CRM capture cancellation/termination handling
-- network offline state
-- WebSocket reconnect logic
-- audio-engine cleanup
-- duplicate capture prevention
-- translation-session cleanup
-- browser capability checks
-- neutral language state when detection is unavailable
-- responsive desktop/mobile UI
-
-## Shortcuts
-
-- `Space` — Start/Stop
-- `M` — Mute microphone processing
-- `A` — Mute translated playback
+- Never place `GEMINI_API_KEY` in client-side source.
+- Use HTTPS/WSS in production.
+- Microphone and tab capture always require browser permission.
+- Tab capture is explicit and user initiated.
+- No hidden microphone capture is attempted.
 
 ## License
 
