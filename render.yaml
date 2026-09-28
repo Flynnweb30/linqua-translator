@@ -1,0 +1,19 @@
+# Render Deployment Configuration for Linqua
+# https://render.com/docs/blueprint-spec
+
+services:
+  # Linqua Full-Stack Web Service (Node.js + WebSockets + Static Assets)
+  - type: web
+    name: linqua-translator
+    env: node
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GEMINI_API_KEY
+        sync: false # Set securely in Render Dashboard Environment Variables
+      - key: PORT
+        value: 10000

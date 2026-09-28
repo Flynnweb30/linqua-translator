@@ -1,0 +1,14 @@
+{
+  "name": "Linqua - Real-Time Spanish \u2194 English Translator",
+  "description": "Linqua: Ultra-low-latency bidirectional Spanish and English speech-to-speech translation for live calls and conversations.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API",
+    "LIVE_CRM_AUDIO_CAPTURE",
+    "AUTOMATIC_ENGLISH_SPANISH_LANGUAGE_DETECTION",
+    "BROWSER_LOCAL_PROCESSED_MICROPHONE_STREAM"
+  ],
+  "developer": "Flynn J.P."
+}
