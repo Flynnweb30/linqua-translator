@@ -12,7 +12,6 @@ export type ConnectionState =
 export type TranslationMode = 'one-way' | 'two-way';
 
 export type DirectionMode = 'es-to-en' | 'en-to-es' | 'auto';
-export type DetectedLanguage = 'es' | 'en' | 'unknown';
 
 export interface TranscriptItem {
   id: string;
@@ -46,8 +45,7 @@ export interface ServerMessage {
     | 'turn_complete'
     | 'error'
     | 'stopped'
-    | 'pong'
-    | 'language_detected';
+    | 'pong';
   mode?: TranslationMode;
   direction?: DirectionMode;
   pcm?: string;

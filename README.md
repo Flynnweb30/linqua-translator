@@ -1,208 +1,134 @@
-# Linqua — Real-Time Spanish ↔ English Translator
+# Linqua - Real-Time Spanish ↔ English Speech-to-Speech Translator
 
-**Developer:** Flynn J.P.
+Linqua is an ultra-low-latency bidirectional Spanish ↔ English voice translation application engineered for live phone calls, video conferences (Zoom/Meet/Teams), and face-to-face conversations.
 
-Linqua is a browser-based real-time Spanish ↔ English speech-to-speech translator designed for CRM calling and live conversations. The implementation uses genuine browser audio capture, Web Audio processing, Gemini Live transcription/language detection, and a server-side WebSocket gateway.
+---
 
-## Important browser/OS limitation
+## Architecture Overview
 
-A normal website **cannot create or register a true system-wide microphone device** that appears in Chrome's microphone picker as a physical/virtual OS microphone.
-
-This project therefore does **not** fake that capability.
-
-After microphone permission is granted, Linqua creates a real processed `MediaStream` through Web Audio and labels the workflow **Linqua Translator** in the UI. That stream can be consumed by browser APIs that accept a `MediaStream`, but it cannot be selected as a microphone by an unrelated CRM website.
-
-For a CRM that requires a system microphone device named **Linqua Translator**, use:
-
-1. Linqua browser app for processing/detection.
-2. A native audio-routing helper.
-3. An OS-level virtual audio device/driver.
-4. Route the processed Linqua stream from the helper into the virtual microphone.
-5. Select that OS device inside the CRM.
-
-Do not rely on an extension alone to manufacture an OS microphone. Chrome extensions can add browser capabilities such as tab/audio capture, but OS-level microphone registration still requires an appropriate native audio-routing layer.
-
-## Live audio workflow
-
-```text
-Selected/default microphone
-        ↓
-Browser permission
-        ↓
-Web Audio processing
-  • echo cancellation
-  • browser noise suppression
-  • high-pass filtering
-  • low-pass filtering
-  • dynamics compression
-        ↓
-Real processed MediaStream
-        ↓
-"Linqua Translator" browser audio stream
-        ↓
-16 kHz mono PCM
-        ↓
-WebSocket /api/live
-        ↓
-Gemini 3.8 Live
-        ↓
-Live input transcription + language code
-        ↓
-English / Spanish indicator
-        ↓
-Translated audio + transcript
+```
+User / Prospect Microphone
+            ↓
+Browser Native Audio API (16kHz mono, 16-bit signed PCM)
+            ↓
+Streaming WebSocket (/api/live)
+            ↓
+Linqua Backend Gateway (Node.js/Express)
+            ↓
+Google Gemini 3.8 Live API (Bilingual Speech-to-Speech Session)
+            ↓
+24kHz Gapless PCM Audio Stream + Live Transcripts
+            ↓
+Continuous Audio Output (Natural Male Voice: Fenrir) + Conversation History
 ```
 
-### CRM/remote-speaker audio
+---
 
-Chrome can provide selected tab audio through `getDisplayMedia()` when the user explicitly chooses a tab/window and enables audio sharing.
+## Prerequisites
 
-Linqua includes a **Capture CRM tab audio** workflow. It does not silently capture another website.
+- **Node.js**: v18.0.0 or higher (v20+ recommended)
+- **Google Gemini API Key**: [Get API Key from Google AI Studio](https://aistudio.google.com/)
 
-When CRM tab audio is active, the captured tab audio becomes the translation/detection input. The microphone continues to be processed independently so the browser-side Linqua Translator stream remains available.
+---
 
-## Language detection
+## Local Development Setup
 
-The language indicator uses the language information returned by the live speech-recognition/transcription engine.
+1. **Clone repository**:
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/linqua.git
+   cd linqua
+   ```
 
-- **Green:** Spanish detected.
-- **Red:** English detected.
-- **Neutral:** no reliable speech/language result, silence, unavailable input, permission failure, or disconnected capture.
+2. **Install dependencies**:
+   ```bash
+   npm install
+   ```
 
-The application does not use keyword guessing, prerecorded audio, simulated speech, or arbitrary language switching.
+3. **Configure environment variables**:
+   Create a `.env` file in the root directory:
+   ```env
+   GEMINI_API_KEY="your_gemini_api_key_here"
+   PORT=3000
+   ```
 
-## Local development
+4. **Start the development server**:
+   ```bash
+   npm run dev
+   ```
+   Open `http://localhost:3000` in Google Chrome, Edge, or Brave.
 
-Requirements:
+---
 
-- Node.js 20+ recommended.
-- Google Gemini API key.
-- Chrome/Edge/another modern browser with microphone support.
+## GitHub & Render Deployment Guide
 
-Create `.env`:
+### Why Render Web Service (Instead of Static Site Only)
 
-```env
-GEMINI_API_KEY=your_key_here
-PORT=3000
-NODE_ENV=development
-```
+Linqua uses **real-time bidirectional audio streaming via WebSockets** (`ws://` / `wss://`) and server-side secret handling so your `GEMINI_API_KEY` is **never exposed** in client-side JavaScript. 
 
-Install and run:
+A purely static site (e.g. GitHub Pages or Render Static Site alone) cannot host WebSocket servers or proxy live audio streams to Gemini without exposing private API keys.
 
-```text
-npm install
-npm run dev
-```
+Linqua provides a **unified full-stack architecture** where:
+- In production, `npm start` serves both the static Vite frontend (`/dist`) AND the real-time WebSocket translation gateway on the same origin and port.
 
-The development server serves the Vite application and `/api/live` WebSocket endpoint from the same origin.
+### Step-by-Step Render Deployment
 
-## Production / Render
+1. **Push to GitHub**:
+   ```bash
+   git init
+   git add .
+   git commit -m "Initial commit of Linqua real-time translator"
+   git branch -M main
+   git remote add origin https://github.com/YOUR_USERNAME/linqua.git
+   git push -u origin main
+   ```
 
-### Use Render Web Service — not Render Static Site
+2. **Deploy on Render**:
+   - Log in to [Render Dashboard](https://dashboard.render.com/).
+   - Click **New +** → **Web Service**.
+   - Connect your GitHub repository `linqua`.
+   - Set the following settings:
+     - **Name**: `linqua-translator`
+     - **Runtime**: `Node`
+     - **Build Command**: `npm install && npm run build`
+     - **Start Command**: `npm start`
+     - **Plan**: `Free` or `Starter` (Starter recommended for persistent WebSocket connections)
 
-The application requires:
+3. **Add Environment Variables in Render**:
+   - In your Render Web Service settings, go to **Environment**:
+     - `NODE_ENV`: `production`
+     - `GEMINI_API_KEY`: *(Paste your Google Gemini API key)*
+     - `PORT`: `10000` (Render's default)
 
-- Node/Express server.
-- WebSocket endpoint `/api/live`.
-- Server-side Gemini API authentication.
+4. **Launch**:
+   - Click **Deploy Web Service**.
+   - Render will build the Vite assets, launch `server.ts`, and provide an HTTPS URL (e.g., `https://linqua-translator.onrender.com`).
+   - WebSockets automatically upgrade over `wss://`.
 
-A pure Render Static Site cannot provide that server-side WebSocket gateway or securely hold the Gemini API key.
+---
 
-Use **New → Web Service** with:
+## Operating Modes
 
-- Runtime: Node
-- Build Command: `npm install && npm run build`
-- Start Command: `npm start`
-- Health Check Path: `/api/health`
+### 1. One-Way Mode
+- **Goal**: Listen to a Spanish speaker and hear continuous English speech (or speak English and have Spanish played).
+- **Behavior**: No button presses needed per sentence. Continuous stream.
 
-Environment variables:
+### 2. Two-Way Mode (CRM & Live Conversation)
+- **Goal**: Dynamic bilingual sales calls and meetings.
+- **Direction Options**:
+  - `AUTO`: Automatic language detection and reciprocal translation.
+  - `Spanish → English`: Strict listening turn.
+  - `English → Spanish`: Strict speaking turn.
+- **CRM Integration**: Record lead details, track deal value, and click **Append Call Transcript** to log dialogue into notes.
 
-```text
-NODE_ENV=production
-GEMINI_API_KEY=<your private Gemini API key>
-PORT=10000
-```
+---
 
-`GEMINI_API_KEY` must be configured in Render's environment settings and must never be committed to GitHub.
+## Keyboard Shortcuts
 
-The included `render.yaml` contains the deployment definition.
+- `Space`: Start / Stop translation
+- `M`: Toggle microphone mute
+- `A`: Toggle translated speaker audio mute
 
-## GitHub
-
-Upload the project root as the repository root. Do not commit:
-
-- `.env`
-- API keys
-- local build output
-- `node_modules`
-
-`.gitignore` is included.
-
-## Production checks
-
-Before deployment, verify:
-
-1. `npm install`
-2. `npm run lint`
-3. `npm run build`
-4. `npm start`
-5. Open `/api/health`
-6. Grant microphone permission.
-7. Confirm the selected microphone appears.
-8. Start translation.
-9. Confirm the processed browser stream becomes available.
-10. Speak Spanish and verify the green language state.
-11. Speak English and verify the red language state.
-12. Stop speaking and verify the state can return to neutral.
-13. Test CRM tab-audio capture from a user gesture.
-14. Disconnect/reconnect the microphone.
-15. Test the app with temporary network loss.
-16. Confirm existing CRM, transcript, settings, playback, reconnect, and mute controls remain usable.
-
-## Deployment architecture
-
-The production topology is intentionally:
-
-```text
-Browser
-  ├── Microphone → Web Audio → processed MediaStream
-  ├── Optional CRM tab audio → Web Audio
-  └── WebSocket over HTTPS/WSS
-                  ↓
-           Render Web Service
-                  ↓
-            Gemini Live API
-```
-
-This preserves the Gemini API key on the server and avoids exposing private credentials in the browser.
-
-## Native virtual-microphone architecture
-
-For a true CRM-selectable microphone named **Linqua Translator**, the recommended production architecture is:
-
-```text
-Linqua Web App
-      ↓
-Processed browser MediaStream
-      ↓
-Native bridge / WebRTC or local IPC transport
-      ↓
-OS virtual audio input
-      ↓
-"Linqua Translator" microphone device
-      ↓
-CRM browser dialer
-```
-
-The exact native bridge depends on the target operating system and CRM. The web application must not claim that this OS device exists until the native audio layer has actually installed and exposed it.
-
-## Security
-
-- Never place `GEMINI_API_KEY` in client-side source.
-- Use HTTPS/WSS in production.
-- Microphone and tab capture always require browser permission.
-- Tab capture is explicit and user initiated.
-- No hidden microphone capture is attempted.
+---
 
 ## License
 

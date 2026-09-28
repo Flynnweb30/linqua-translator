@@ -12,7 +12,7 @@ import {
   TranslationMode,
 } from './types/translation';
 import { CRMCallRecord, DEFAULT_CRM_RECORD } from './types/crm';
-import { AudioCaptureEngine, RemoteAudioCaptureEngine, AudioDeviceInfo } from './services/audioCapture';
+import { AudioCaptureEngine } from './services/audioCapture';
 import { AudioPlaybackEngine } from './services/audioPlayback';
 import { TranslationClient } from './services/translationClient';
 import { Header } from './components/Header';
@@ -24,8 +24,6 @@ import { MicrophonePermissionModal } from './components/MicrophonePermissionModa
 import { UserGuideModal } from './components/UserGuideModal';
 import { CRMCallWorkspace } from './components/CRMCallWorkspace';
 import { CommunicationCoach } from './components/CommunicationCoach';
-import { AudioRoutingPanel } from './components/AudioRoutingPanel';
-import { DetectedLanguage } from './types/translation';
 
 const DEFAULT_SETTINGS: AppSettings = {
   voiceName: 'Fenrir',
@@ -50,10 +48,6 @@ export default function App() {
 
   // Audio metrics
   const [volumeLevel, setVolumeLevel] = useState(0);
-  const [detectedLanguage, setDetectedLanguage] = useState<DetectedLanguage>('unknown');
-  const [inputDevices, setInputDevices] = useState<AudioDeviceInfo[]>([]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState('default');
-  const [remoteCaptureActive, setRemoteCaptureActive] = useState(false);
 
   // Transcripts
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
@@ -97,8 +91,6 @@ export default function App() {
 
   // Engines refs
   const captureEngineRef = useRef<AudioCaptureEngine | null>(null);
-  const remoteCaptureEngineRef = useRef<RemoteAudioCaptureEngine | null>(null);
-  const selectedDeviceIdRef = useRef('default');
   const playbackEngineRef = useRef<AudioPlaybackEngine | null>(null);
   const clientRef = useRef<TranslationClient | null>(null);
 
@@ -156,12 +148,10 @@ export default function App() {
   // Initialize translation client
   useEffect(() => {
     const captureEngine = new AudioCaptureEngine();
-    const remoteCaptureEngine = new RemoteAudioCaptureEngine();
     const playbackEngine = new AudioPlaybackEngine();
     playbackEngine.setAutoPlay(settings.autoPlayTranslation);
 
     captureEngineRef.current = captureEngine;
-    remoteCaptureEngineRef.current = remoteCaptureEngine;
     playbackEngineRef.current = playbackEngine;
 
     const client = new TranslationClient({
@@ -176,7 +166,6 @@ export default function App() {
         setInterimOriginal(text);
         if (lang === 'en' || lang === 'es') {
           setInterimLang(lang);
-          setDetectedLanguage(lang);
         }
       },
       onInputTranscript: (text, finished, lang) => {
@@ -186,7 +175,6 @@ export default function App() {
         });
         if (lang === 'en' || lang === 'es') {
           setInterimLang(lang);
-          setDetectedLanguage(lang);
         }
       },
       onOutputTranscript: (text, _finished, _lang) => {
@@ -198,9 +186,6 @@ export default function App() {
       },
       onTurnComplete: () => {
         commitTurn();
-      },
-      onLanguageDetected: (lang) => {
-        setDetectedLanguage(lang);
       },
       onError: (errMsg) => {
         setStateMessage(errMsg);
@@ -229,66 +214,8 @@ export default function App() {
       client.stop();
       captureEngine.stop();
       playbackEngine.close();
-      remoteCaptureEngine.stop();
     };
   }, [commitTurn, settings.autoPlayTranslation]);
-
-  const refreshInputDevices = useCallback(async () => {
-    if (!captureEngineRef.current) return;
-    try {
-      const devices = await captureEngineRef.current.listInputDevices();
-      setInputDevices(devices);
-      if (!selectedDeviceIdRef.current && devices.length) {
-        selectedDeviceIdRef.current = devices[0].deviceId;
-      }
-    } catch {
-      setInputDevices([]);
-    }
-  }, []);
-
-  const selectInputDevice = (deviceId: string) => {
-    selectedDeviceIdRef.current = deviceId;
-    setSelectedDeviceId(deviceId);
-    if (captureEngineRef.current?.isActive()) {
-      setStateMessage('Microphone changed. Stop and start translation to apply the new device.');
-    }
-  };
-
-  const startRemoteCapture = async () => {
-    if (!remoteCaptureEngineRef.current) return;
-    try {
-      await remoteCaptureEngineRef.current.startRemote({
-        onAudioChunk: (pcm) => {
-          // When CRM tab audio is active, it becomes the translation/detection input.
-          if (clientRef.current) clientRef.current.sendAudio(pcm);
-        },
-        onVolumeChange: (vol) => setVolumeLevel(vol),
-        onStatus: (status) => {
-          if (status === 'device-disconnected') {
-            setRemoteCaptureActive(false);
-            setDetectedLanguage('unknown');
-            setStateMessage('CRM tab audio capture ended.');
-          }
-        },
-      });
-      setRemoteCaptureActive(true);
-      setDetectedLanguage('unknown');
-      setStateMessage('CRM tab audio is live. Start translation to process the captured speaker audio.');
-    } catch (err) {
-      setRemoteCaptureActive(false);
-      setStateMessage(err instanceof Error ? err.message : 'CRM tab audio capture was not available.');
-    }
-  };
-
-  const stopRemoteCapture = () => {
-    remoteCaptureEngineRef.current?.stop();
-    setRemoteCaptureActive(false);
-    setDetectedLanguage('unknown');
-  };
-
-  useEffect(() => {
-    void refreshInputDevices();
-  }, [refreshInputDevices]);
 
   // Start Translation session
   const startTranslation = async () => {
@@ -301,28 +228,21 @@ export default function App() {
       await captureEngineRef.current.start(
         {
           onAudioChunk: (base64Pcm) => {
-            if (!remoteCaptureEngineRef.current?.isActive() && clientRef.current) {
+            if (clientRef.current) {
               clientRef.current.sendAudio(base64Pcm);
             }
           },
           onVolumeChange: (vol) => {
             setVolumeLevel(vol);
           },
-          onStatus: (status) => {
-            if (status === 'device-disconnected') {
-              setDetectedLanguage('unknown');
-              setStateMessage('Microphone disconnected. Select another input device or reconnect the microphone.');
-            }
-          },
           onError: (err) => {
             console.error('Audio capture error:', err);
           },
         },
-        { noiseSuppression: settings.noiseSuppression, deviceId: selectedDeviceIdRef.current }
+        { noiseSuppression: settings.noiseSuppression }
       );
 
       // Connect to Gemini Live
-      await refreshInputDevices();
       clientRef.current.connect(mode, direction, settings.voiceName);
     } catch (err: any) {
       console.error('Failed to start translation:', err);
@@ -344,9 +264,6 @@ export default function App() {
     if (captureEngineRef.current) {
       captureEngineRef.current.stop();
     }
-    remoteCaptureEngineRef.current?.stop();
-    setRemoteCaptureActive(false);
-    setDetectedLanguage('unknown');
     if (playbackEngineRef.current) {
       playbackEngineRef.current.flush();
     }
@@ -451,20 +368,6 @@ export default function App() {
           disabled={connectionState === 'connecting' || connectionState === 'stopping'}
         />
 
-        <AudioRoutingPanel
-          devices={inputDevices}
-          selectedDeviceId={selectedDeviceId}
-          audioStatus={captureEngineRef.current?.getStatus() ?? 'idle'}
-          processedStreamReady={Boolean(captureEngineRef.current?.getProcessedStream())}
-          remoteCaptureActive={remoteCaptureActive}
-          remoteCaptureSupported={Boolean(navigator.mediaDevices?.getDisplayMedia)}
-          detectedLanguage={detectedLanguage}
-          onSelectDevice={selectInputDevice}
-          onStartRemoteCapture={startRemoteCapture}
-          onStopRemoteCapture={stopRemoteCapture}
-          onRefreshDevices={refreshInputDevices}
-        />
-
         {/* CRM Call Workspace (Active call context for two-way conversations) */}
         <CRMCallWorkspace
           record={crmRecord}
@@ -523,7 +426,7 @@ export default function App() {
           </div>
 
           <div className="flex items-center space-x-2">
-            <span>Engine: Processed live PCM ↔ Gemini Live • Developer: Flynn J.P.</span>
+            <span>Engine: 16-bit PCM streaming ↔ Gemini 3.8 Live (Voice: {settings.voiceName})</span>
           </div>
         </div>
       </main>

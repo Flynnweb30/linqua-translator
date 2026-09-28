@@ -46,14 +46,6 @@ interface SessionOptions {
   voiceName?: string;
 }
 
-function normalizeLanguageCode(languageCode?: string): 'es' | 'en' | undefined {
-  if (!languageCode) return undefined;
-  const code = languageCode.toLowerCase();
-  if (code === 'es' || code.startsWith('es-')) return 'es';
-  if (code === 'en' || code.startsWith('en-')) return 'en';
-  return undefined;
-}
-
 function buildSystemInstruction(opts: SessionOptions): string {
   const baseRules = `You are Linqua, an ultra-low-latency real-time voice interpreter for phone calls, video meetings, and face-to-face business conversations.
 CRITICAL TRANSLATION RULES:
@@ -211,29 +203,21 @@ wss.on('connection', (clientWs: WebSocket) => {
 
             // Interim live transcription (while user speaks)
             if (serverContent.interimInputTranscription?.text) {
-              const languageCode = normalizeLanguageCode(serverContent.interimInputTranscription.languageCode);
               safeSend({
                 type: 'interim_input',
                 text: serverContent.interimInputTranscription.text,
-                lang: languageCode,
+                lang: serverContent.interimInputTranscription.languageCode,
               });
-              if (languageCode) {
-                safeSend({ type: 'language_detected', lang: languageCode });
-              }
             }
 
             // Final / segment input transcription
             if (serverContent.inputTranscription?.text) {
-              const languageCode = normalizeLanguageCode(serverContent.inputTranscription.languageCode);
               safeSend({
                 type: 'input_transcript',
                 text: serverContent.inputTranscription.text,
                 finished: Boolean(serverContent.inputTranscription.finished),
-                lang: languageCode,
+                lang: serverContent.inputTranscription.languageCode,
               });
-              if (languageCode) {
-                safeSend({ type: 'language_detected', lang: languageCode });
-              }
             }
 
             // Output transcription (the spoken translation text)
